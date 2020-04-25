@@ -5,6 +5,7 @@ const https = require('https');
 const fs = require('fs');
 const app = express();
 const ip = require('ip');
+const jwt = require('jsonwebtoken');
 
 app.use(cors());
 
@@ -23,8 +24,23 @@ router.get('/api', async (req, res) => {
 	res.send(paths);
 });
 
+privatePath = './assets/private.key';
+
 router.get('/api/login', (req, res) => {
-    res.send('Work In progress');
+    const user = req.body.username;
+    const pass = req.body.password;
+
+    if (user === null || pass === null) {
+        res.status(400).send('Unable to find required data!');
+        return;
+    }
+    const key = fs.readFileSync(privatePath);
+    const token = jwt.sign(
+        {data: 'foobar'},
+        key,
+        {expiresIn: '1h', algorithm: 'RS256'}, (err, token) => {
+            res.send({token: token});
+        });
 });
 
 
