@@ -1,2 +1,4 @@
 node_modules/
 .idea/
+/assets/fullchain.pem
+/assets/privkey.pem
