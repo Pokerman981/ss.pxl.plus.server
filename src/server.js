@@ -6,28 +6,31 @@ const fs = require('fs');
 const app = express();
 const ip = require('ip');
 const jwt = require('jsonwebtoken');
+const bodyparser = require('body-parser');
 
 app.use(cors());
+app.use(bodyparser);
+
 
 
 router.get('/', (req, res) => {
-	res.status(403).send();
+    res.status(403).send();
 });
 
 router.get('/api', async (req, res) => {
-	//TODO Authorize
+    //TODO Authorize
     let paths = {routes: []};
     for (let stack of router.stack) {
         paths.routes.push(stack.route.path);
     }
 
-	res.send(paths);
+    res.send(paths);
 });
 
 privatePath = './assets/private.key';
 
 router.post('/api/login', (req, res) => {
-    console.log(req.body);
+    console.dir(req.body);
     const user = req.body.username;
     const pass = req.body.password;
 
@@ -51,8 +54,8 @@ keyPath = './assets/privkey.pem';
 certPath = './assets/fullchain.pem';
 
 const options = {
-	key: fs.readFileSync(keyPath),
-	cert: fs.readFileSync(certPath)
+    key: fs.readFileSync(keyPath),
+    cert: fs.readFileSync(certPath)
 };
 
 const httpsServer = https.createServer(options, app);
