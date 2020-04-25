@@ -13,10 +13,20 @@ router.get('/', (req, res) => {
 	res.status(403).send();
 });
 
-router.get('/api/', (req, res) => {
+router.get('/api', async (req, res) => {
 	//TODO Authorize
-	res.send(router.stack);
+    let paths = {routes: []};
+    for (let stack of router.stack) {
+        paths.routes.push(stack.route.path);
+    }
+
+	res.send(paths);
 });
+
+router.get('/api/login', (req, res) => {
+    res.send('Work In progress');
+});
+
 
 app.use('/', router);
 
