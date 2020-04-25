@@ -26,7 +26,7 @@ router.get('/api', async (req, res) => {
 
 privatePath = './assets/private.key';
 
-router.get('/api/login', (req, res) => {
+router.post('/api/login', (req, res) => {
     const user = req.body.username;
     const pass = req.body.password;
 
