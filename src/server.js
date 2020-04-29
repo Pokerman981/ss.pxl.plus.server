@@ -42,12 +42,17 @@ const httpsServer = https.createServer(options, app);
 httpsServer.listen(port, domain);
 console.log(`Server running at ${domain + port}`);
 
+con.connect(err => {
+    if (err) throw err;
+    console.log('Connected To The DB');
+});
+
 
 
 
 function registerRoutes() {
     router.all('*', (req, res, next) => {
-        console.log('New Request', req.body);
+        console.log('New Request', req.headers, req.body);
         next();
     });
 
@@ -83,23 +88,22 @@ function registerRoutes() {
             return;
         }
 
-        con.connect(err => {
-           if (err) throw err;
-           console.log('Connected To The DB');
-        });
-
         let sql = `SELECT * from users where username=? OR email=? AND password=?;`;
         con.query(sql, [user, user, pass], (err, result) => {
             if (err) throw err;
-            console.log(result);
+            if (result.length === 1) {
+                const key = fs.readFileSync(privatePath, {encoding:'utf8'});
+                jwt.sign({data:{username: result[0].username, id: result[0]['user_id'], valid: true}}, key, {expiresIn: '1h', algorithm: 'RS256'},
+                    (err, token) => {
+                        res.send({token: token});
+                    });
+            } else {
+                res.status(401).send('Username or Password is incorrect');
+            }
         });
 
 
-        const key = fs.readFileSync(privatePath, {encoding:'utf8'});
-        jwt.sign({data:{username: user, password: pass}}, key, {expiresIn: '1h', algorithm: 'RS256'},
-            (err, token) => {
-                res.send({token: token});
-            });
+
 
     });
 
