@@ -7,6 +7,7 @@ const app = express();
 const jwt = require('jsonwebtoken');
 const bodyparser = require('body-parser');
 const mysql = require('mysql');
+const path = require('path');
 
 app.use(cors());
 app.use(bodyparser.json());
@@ -27,6 +28,14 @@ const options = {
     cert: fs.readFileSync(certPath)
 };
 
+const availableServers = [
+    'pokedash',
+    'pokeclub',
+    'pokelegends',
+    'pokebrawl',
+
+];
+
 const con = mysql.createConnection({
     host: 'localhost',
     user:'ss.pxl.plus.server',
@@ -40,15 +49,21 @@ const pubPath = 'assets/jwtRS512.key.pub';
 const httpsServer = https.createServer(options, app);
 
 httpsServer.listen(port, domain);
-console.log(`Server running at ${domain + port}`);
+console.log(`Server running at ${domain + ':' + port}`);
 
-con.connect(err => {
-    if (err) throw err;
-    console.log('Connected To The DB');
-});
+function connectToDB() {
+    con.connect(err => {
+        if (err) {
+            con.resume();
+        }
+        console.log('Connected To The DB');
+    });
+}
 
-
-
+function closeDB() {
+    con.pause();
+    console.log('Paused connection');
+}
 
 function registerRoutes() {
     router.all('*', (req, res, next) => {
@@ -87,24 +102,23 @@ function registerRoutes() {
             res.status(400).send('Unable to find required data!');
             return;
         }
+        connectToDB();
 
         let sql = `SELECT * from users where username=? OR email=? AND password=?;`;
         con.query(sql, [user, user, pass], (err, result) => {
             if (err) throw err;
             if (result.length === 1) {
                 const key = fs.readFileSync(privatePath, {encoding:'utf8'});
-                jwt.sign({data:{username: result[0].username, id: result[0]['user_id'], valid: true}}, key, {expiresIn: '1h', algorithm: 'RS256'},
+                jwt.sign({data:{username: result[0].username, id: result[0]['user_id'], valid: true}}, key, {expiresIn: '1d', algorithm: 'RS256'},
                     (err, token) => {
                         res.send({token: token});
+                        closeDB();
                     });
             } else {
+                closeDB();
                 res.status(401).send('Username or Password is incorrect');
             }
         });
-
-
-
-
     });
 
     router.get('/api/verify', (req, res) => {
@@ -119,11 +133,23 @@ function registerRoutes() {
             console.log(err, decoded);
             res.send(decoded);
         });
+    });
 
 
+    const logFile = `ecotracker.json`;
+    router.post('/api/ecotracker', (req, res) => {
+        // TODO Make it so the servers can only use the route
+        const server = req.get('server');
+        if (server === null || !availableServers.includes(server)) {
+            res.status(403).end();
+            return;
+        }
+        let body = "%" + JSON.stringify(req.body) + "\n";
 
-
-
+        fs.appendFile(logFile, body, err => {
+                if (err) { console.log(err); }
+        });
+        res.send('Sent to server!');
     });
 
 
