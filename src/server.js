@@ -24,8 +24,12 @@ const availableServers = [
     'club',
     'legends',
     'brawl',
-    'verse'
+    'verse',
+    'zone1',
+    'zone2'
 ];
+
+
 
 const mysqlConfig = {
     host: 'localhost',
@@ -58,6 +62,7 @@ let timer = setInterval(() => {
     calculateTotals();
     console.log('Calc Totals Called');
 }, 25000 * 1000); // 50000
+    calculateTotals();
 
 
 async function registerRoutes() {
@@ -140,18 +145,6 @@ async function registerRoutes() {
             return;
         }
 
-        // mysqlPool.getConnection((err, connection) => {
-        //    if (err) throw err;
-        //    let sql = "INSERT INTO ecotracker_poke"+ server +" VALUES ('"+ req.body.action +"','"+ req.body.totalPrice +"','"+ req.body.itemName +"','"+ req.body.itemQuantity +"','"+ getFormattedDate() +"');";
-        //    console.log(sql);
-        //     connection.query(sql, (err2, result) =>{
-        //         if (err2) throw err2;
-        //         res.send();
-        //
-        //         console.log(result);
-        //         connection.release();
-        //     });
-        // });
         let body = "%" + JSON.stringify(req.body) + "\n";
 
         fs.appendFile(logFile, body, err => {
@@ -163,29 +156,52 @@ async function registerRoutes() {
 
     router.get('/api/ecotracker', async (req, res) => {
         const token = req.get('token');
+        const server = req.get('server');
+        const date = req.get('requestedDate');
+
         if (token == null) {
-            res.status(400).send('Error: Missing Token!');
+            res.status(400).send('Error: Missing Token!').end();
             return;
         }
 
-        const decoded = await verifyToken(token);
-        if (decoded.data.valid !== true) {
-            res.status(401).end();
+        if (server == null) {
+            res.status(400).send('Error: Missing Server!').end();
+            return;
         }
 
-        let server = null; // TODO
-        let date = null;
+        if (date == null) {
+            res.status(400).send('Error: Missing Date!').end();
+            return;
+        }
 
-        mysqlPool.getConnection((err, con) => {
-           const SQL = `SELECT FROM ${server} WHERE `
-        });
 
-        // TODO Get mysql connection and return data
+        await verifyToken(token)
+            .then(value => {
+                mysqlPool.getConnection(async (err, con) => {
+                    if (err) throw err;
+                    console.log('Connected To DB');
+                    const SQL = `SELECT date, data FROM ecotracker_poke${server} WHERE date BETWEEN '${date}' AND '${getFormattedDate()}';`;
 
-       res.send();
+                    // Can make this an await
+                    con.query(SQL, (err, result) => {
+                        if (err) throw err;
+
+                        con.release();
+                        console.log('Connection Released', server, date, token);
+                        res.send(result);
+                    });
+                });
+            })
+            .catch(reason => {
+                console.log(reason);
+                // TODO Add a response
+            });
+
+
+
     });
 
-    async function verifyToken(token) {
+    async function verifyToken(token) { // TODO Make it so when the method finds a invalid token it cancels the request
         const key = fs.readFileSync(pubPath, {encoding:'utf8'});
 
          let resolve = await jwt.verify(token, key,{algorithms: ['RS256']}, async (errVerify, decoded) => {
@@ -193,8 +209,6 @@ async function registerRoutes() {
             return await decoded;
         });
          return await resolve;
-
-
     }
 
 
@@ -216,6 +230,8 @@ function calculateTotals() {
                 let clubRecords = [];
                 let brawlRecords = [];
                 let legendsRecords = [];
+                let zone1Records = [];
+                let zone2Records = [];
 
 
                 records.forEach((record, index) => {
@@ -245,31 +261,47 @@ function calculateTotals() {
                             clubRecords.push(parsed);
                             break;
                         }
+                        case 'zone1': {
+                            zone1Records.push(parsed);
+                            break;
+                        }
+                        case 'zone2': {
+                            zone2Records.push(parsed);
+                            break;
+                        }
                     }
 
 
                     // console.log(temp.server, index, records.length);
                 });
-
                 // TODO Make this more modular
                 mysqlPool.getConnection((err, conn) => {
                   if (err) throw err;
 
+                  console.log('connected');
                     calculatePerServer(dashRecords).then(data => {
-                        addToDB('pokedash', conn, data, fileDate);
+                        addToDB('dash', conn, data, fileDate);
                     });
                     calculatePerServer(verseRecords).then(data => {
-                        addToDB('pokeverse', conn, data, fileDate);
+                        addToDB('verse', conn, data, fileDate);
                     });
                     calculatePerServer(clubRecords).then(data => {
-                        addToDB('pokeclub', conn, data, fileDate);
+                        addToDB('club', conn, data, fileDate);
                     });
                     calculatePerServer(legendsRecords).then(data => {
-                        addToDB('pokelegends', conn, data, fileDate);
+                        addToDB('legends', conn, data, fileDate);
                     });
                     calculatePerServer(brawlRecords).then(data => {
-                        addToDB('pokebrawl', conn, data, fileDate);
+                        addToDB('brawl', conn, data, fileDate);
                     });
+                    calculatePerServer(zone1Records).then(data => {
+                        addToDB('zone1', conn, data, fileDate);
+                    });
+                    calculatePerServer(zone2Records).then(data => {
+                        addToDB('zone2', conn, data, fileDate);
+                    });
+
+
                     setTimeout(() => {
                         conn.release();
                         console.log('Released connection');
@@ -277,11 +309,9 @@ function calculateTotals() {
                         fs.rename(dataDir + file, archiveDir + file, (err) => {
                             if (err) throw err;
                             console.log('Moved file');
-                        });
-
-                    }, 50 * 1000)
-
-
+                            control = false;
+                        }, 25 * 1000);
+                    })
                 });
             })
                 .catch(reason => {
@@ -293,7 +323,7 @@ function calculateTotals() {
         });
 
     function addToDB(server, connection, data, date) {
-        const sql = `INSERT INTO ecotracker_${server} VALUES ('${date}','${JSON.stringify(data)}');`;
+        const sql = `INSERT INTO ecotracker_poke${server} VALUES ('${date}','${JSON.stringify(data)}');`;
         connection.query(sql, (insertErr, result) => {
             if (insertErr) throw insertErr;
             return result;
@@ -305,40 +335,78 @@ function calculateTotals() {
         let mostSoldByValue = new Map();
         let mostBoughtByQuantity = new Map();
         let mostSoldByQuantity = new Map();
+        let mostBoughtByPlayer = new Map();
+        let mostSoldByPlayer = new Map();
+        let totalsInDay = new Map();
 
         for (let transaction of transactionArray) {
-            if (transaction.action === 'buy') {
-                if (mostBoughtByValue.get(transaction.itemName) === undefined) {
-                    mostBoughtByValue.set(transaction.itemName, parseFloat(transaction.totalPrice));
+            const action = transaction.action,
+             itemName = transaction.itemName,
+             totalPrice = transaction.totalPrice,
+             itemQuantity = transaction.itemQuantity,
+             targetName = transaction.targetName;
+
+            if (action === 'buy') {
+                if (mostBoughtByValue.get(itemName) === undefined) {
+                    mostBoughtByValue.set(itemName, parseFloat(totalPrice));
                 } else {
-                    let temp = parseFloat(mostBoughtByValue.get(transaction.itemName)) + parseFloat(transaction.totalPrice);
-                    mostBoughtByValue.set(transaction.itemName, temp);
+                    let temp = parseFloat(mostBoughtByValue.get(itemName)) + parseFloat(totalPrice);
+                    mostBoughtByValue.set(itemName, parseFloat(temp));
                 }
 
-                if (mostBoughtByQuantity.get(transaction.itemName) === undefined) {
-                    mostBoughtByQuantity.set(transaction.itemName, parseFloat(transaction.itemQuantity));
+                if (mostBoughtByQuantity.get(itemName) === undefined) {
+                    mostBoughtByQuantity.set(itemName, parseFloat(itemQuantity));
                 } else {
-                    let temp = parseInt(mostBoughtByQuantity.get(transaction.itemName)) + parseInt(transaction.itemQuantity);
-                    mostBoughtByQuantity.set(transaction.itemName, temp);
+                    let temp = parseInt(mostBoughtByQuantity.get(itemName)) + parseInt(itemQuantity);
+                    mostBoughtByQuantity.set(itemName, parseFloat(temp));
                 }
+
+                if (mostBoughtByPlayer.get(targetName) === undefined) {
+                    mostBoughtByPlayer.set(targetName, parseFloat(itemQuantity));
+                } else {
+                    let temp = parseFloat(mostBoughtByPlayer.get(targetName)) + parseFloat(totalPrice);
+                    mostBoughtByPlayer.set(targetName, parseFloat(temp));
+                }
+
+                if (totalsInDay.get("bought") === undefined) {
+                    totalsInDay.set("bought", parseFloat(totalPrice));
+                } else {
+                    let temp = parseFloat(totalsInDay.get("bought")) + parseFloat(totalPrice);
+                    totalsInDay.set("bought", parseFloat(temp));
+                }
+
             } else {
-                if (mostSoldByValue.get(transaction.itemName) === undefined) {
-                    mostSoldByValue.set(transaction.itemName, parseFloat(transaction.totalPrice));
+                if (mostSoldByValue.get(itemName) === undefined) {
+                    mostSoldByValue.set(itemName, parseFloat(totalPrice));
                 } else {
-                    let temp = parseFloat(mostSoldByValue.get(transaction.itemName)) + parseFloat(transaction.totalPrice);
-                    mostSoldByValue.set(transaction.itemName, temp);
+                    let temp = parseFloat(mostSoldByValue.get(itemName)) + parseFloat(totalPrice);
+                    mostSoldByValue.set(itemName, temp);
                 }
 
-                if (mostSoldByQuantity.get(transaction.itemName) === undefined) {
-                    mostSoldByQuantity.set(transaction.itemName, parseFloat(transaction.itemQuantity));
+                if (mostSoldByQuantity.get(itemName) === undefined) {
+                    mostSoldByQuantity.set(itemName, parseFloat(itemQuantity));
                 } else {
-                    let temp = parseInt(mostSoldByQuantity.get(transaction.itemName)) + parseInt(transaction.itemQuantity);
-                    mostSoldByQuantity.set(transaction.itemName, temp);
+                    let temp = parseInt(mostSoldByQuantity.get(itemName)) + parseInt(itemQuantity);
+                    mostSoldByQuantity.set(itemName, temp);
+                }
+
+                if (mostSoldByPlayer.get(targetName) === undefined) {
+                    mostSoldByPlayer.set(targetName, parseFloat(itemQuantity));
+                } else {
+                    let temp = parseFloat(mostSoldByPlayer.get(targetName)) + parseFloat(totalPrice);
+                    mostSoldByPlayer.set(targetName, parseFloat(temp));
+                }
+
+                if (totalsInDay.get("sold") === undefined) {
+                    totalsInDay.set("sold", parseFloat(totalPrice));
+                } else {
+                    let temp = parseFloat(totalsInDay.get("sold")) + parseFloat(totalPrice);
+                    totalsInDay.set("sold", parseFloat(temp));
                 }
             }
         }
 
-        return [mapToObject(mostBoughtByValue), mapToObject(mostSoldByValue), mapToObject(mostBoughtByQuantity), mapToObject(mostSoldByQuantity)];
+        return [{totals:mapToObject(totalsInDay)}, {mostBoughtByValue:mapToObject(mostBoughtByValue)}, {mostSoldByValue: mapToObject(mostSoldByValue)}, {mostBoughtByQuantity: mapToObject(mostBoughtByQuantity)}, {mostSoldByQuantity: mapToObject(mostSoldByQuantity)}, {mostBoughtByPlayer: mapToObject(mostBoughtByPlayer)}, {mostSoldByPlayer: mapToObject(mostSoldByPlayer)}];
     }
 
     function mapToObject(m) {
