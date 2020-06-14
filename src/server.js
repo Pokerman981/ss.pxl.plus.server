@@ -50,20 +50,31 @@ app.use(bodyparser.json());
 
 
 registerRoutes().then(() => {
+    app.use('/', router);
+    httpsServer.listen(port, domain);
+    })
+    .catch(reason => {
+        throw reason;
+    })
+    .finally(() => {
+        console.log(`Server running at ${domain + ':' + port}`);
+        registerIntervals()
+            .catch(reason => {
+                throw reason;
+            })
+            .finally(() => {
+                console.log(`Registered Intervals`)
+            });
+    });
 
-});
-app.use('/', router);
 
-httpsServer.listen(port, domain);
-console.log(`Server running at ${domain + ':' + port}`);
 
-let date = getFormattedDate();
-let timer = setInterval(() => {
+async function registerIntervals() {
+    setInterval(() => {
+        calculateTotals();
+    }, 25000 * 1000); // Milliseconds
     calculateTotals();
-    console.log('Calc Totals Called');
-}, 25000 * 1000); // 50000
-    calculateTotals();
-
+}
 
 async function registerRoutes() {
     router.all('*', (req, res, next) => {
@@ -132,11 +143,10 @@ async function registerRoutes() {
             return;
         }
         res.send(await verifyToken(token));
-
     });
 
 
-    router.post('/api/ecotracker', (req, res) => {
+    router.post('/api/ecotracker', async (req, res) => {
          let logFile = `src/data/ecotracker_${getFormattedDate()}.json`;
         // TODO Make it so the servers can only use the route
         const server = req.get('server');
@@ -153,7 +163,6 @@ async function registerRoutes() {
             res.send('Sent to server!');
         });
     });
-
     router.get('/api/ecotracker', async (req, res) => {
         const token = req.get('token');
         const server = req.get('server');
@@ -201,11 +210,18 @@ async function registerRoutes() {
 
     });
 
+    router.post('/api/playercounter', async (req, res) => {
+
+    });
+
+
+
     async function verifyToken(token) { // TODO Make it so when the method finds a invalid token it cancels the request
         const key = fs.readFileSync(pubPath, {encoding:'utf8'});
+        let error = false;
 
          let resolve = await jwt.verify(token, key,{algorithms: ['RS256']}, async (errVerify, decoded) => {
-            if (errVerify) throw errVerify;
+            if (errVerify) return await errVerify;
             return await decoded;
         });
          return await resolve;
