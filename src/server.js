@@ -7,8 +7,7 @@ const app = express();
 const jwt = require('jsonwebtoken');
 const bodyparser = require('body-parser');
 const mysql = require('mysql');
-const path = require('path');
-
+const ping = require('minecraft-server-util');
 keyPath = '/etc/letsencrypt/live/ss.pxl.plus/privkey.pem';
 certPath = '/etc/letsencrypt/live/ss.pxl.plus/fullchain.pem';
 domain = 'ss.pxl.plus';
@@ -28,6 +27,16 @@ const availableServers = [
     'zone1',
     'zone2'
 ];
+const serverIPS = [
+    {hostname: 'play.pokedash.org', port: 25565},
+    {hostname: 'play.pokeverse.org', port: 25565},
+    {hostname: 'play.pokelegends.net', port: 25565},
+    {hostname: 'play.pokeclub.net', port: 25565},
+    {hostname: 'play.poke-brawl.com', port: 25565},
+    {hostname: 'play.pokezone.net', port: 25565}
+];
+
+let mostrecentPing;
 
 
 
@@ -49,31 +58,87 @@ app.use(cors());
 app.use(bodyparser.json());
 
 
-registerRoutes().then(() => {
-    app.use('/', router);
-    httpsServer.listen(port, domain);
+registerRoutes()
+    .then(async () => {
+        app.use('/', router);
+        await httpsServer.listen(port, domain);
+        console.log(`Server running at ${domain + ':' + port}`);
+
+        calculateTotals();
+        pingServers()
+            .then(value => {
+                mostrecentPing = value;
+                addToDB(value);
+            })
+            .catch(reason => {
+                throw reason;
+            });
+        console.log('Calculating Values');
+
+        registerIntervals();
+        console.log(`Registered Intervals`);
+
     })
     .catch(reason => {
         throw reason;
-    })
-    .finally(() => {
-        console.log(`Server running at ${domain + ':' + port}`);
-        registerIntervals()
-            .catch(reason => {
-                throw reason;
-            })
-            .finally(() => {
-                console.log(`Registered Intervals`)
-            });
     });
 
 
-
-async function registerIntervals() {
+function registerIntervals() {
     setInterval(() => {
         calculateTotals();
     }, 25000 * 1000); // Milliseconds
-    calculateTotals();
+
+    setInterval(() => {
+        console.log('Servers Pinged');
+        pingServers()
+            .then(value => {
+                mostrecentPing = value;
+                addToDB(value);
+            })
+            .catch(reason => {
+                throw reason;
+            });
+    }, 60000); // Milliseconds
+
+}
+
+async function pingServers() { // TODO Have this return values instead of doing it here
+    const pingResult = [];
+    for (let server of serverIPS) {
+        await ping(server.hostname, server.port)
+            .then(value => {
+                pingResult.push({
+                    hostname: server.hostname ,
+                    onlinePlayers: value.onlinePlayers != null ? value.onlinePlayers : 0,
+                    maxPlayers: value.maxPlayers != null ? value.maxPlayers : 0
+                });
+            })
+            .catch(reason => {
+                console.log(reason);
+                pingResult.push({
+                    hostname: server.hostname ,
+                    onlinePlayers: 0,
+                    maxPlayers: 0
+                });
+            });
+    }
+
+    return pingResult;
+}
+
+function addToDB(data) {
+     mysqlPool.getConnection(async (err, conn) => {
+        if (err) throw err;
+
+        const SQL = `INSERT INTO playercounter VALUES ('${getTimeStamp()}', '${JSON.stringify(data)}')`;
+        console.log("Insert into DB");
+        conn.query(SQL, (insertErr, result) => {
+            if (insertErr) throw insertErr;
+            console.log("Release ping conn");
+            conn.release();
+        });
+    });
 }
 
 async function registerRoutes() {
@@ -145,6 +210,9 @@ async function registerRoutes() {
         res.send(await verifyToken(token));
     });
 
+    router.get('/api/serverstatus', async (req, res) => {
+
+    });
 
     router.post('/api/ecotracker', async (req, res) => {
          let logFile = `src/data/ecotracker_${getFormattedDate()}.json`;
@@ -210,7 +278,41 @@ async function registerRoutes() {
 
     });
 
-    router.post('/api/playercounter', async (req, res) => {
+    router.get('/api/playercounter', async (req, res) => {
+        const token = req.get('token');
+        const lowerDate = req.get('lowerDate');
+        const higherDate = req.get('higherDate');
+
+        if (token == null) {
+            res.status(400).send('Error: Missing Token!').end();
+            return;
+        }
+
+        if (lowerDate == null) {
+            res.status(400).send('Error: Missing Lower Date!').end();
+            return;
+        }
+
+        if (higherDate == null) {
+            res.status(400).send('Error: Missing Higher Date!').end();
+            return;
+        }
+
+        await verifyToken(token)
+            .then(async (value) => {
+                const SQL = `SELECT date, data FROM playercounter WHERE date BETWEEN '${lowerDate}' AND '${higherDate}';`;
+                await mysqlPool.getConnection((err, conn) => {
+                    if (err) throw err;
+                    conn.query(SQL, (err2, result) => {
+                        if (err2) throw err2;
+                        res.send(result);
+                        conn.release();
+                    });
+                });
+            })
+            .catch(reason => {
+                res.status(400).send(reason);
+            })
 
     });
 
@@ -218,7 +320,6 @@ async function registerRoutes() {
 
     async function verifyToken(token) { // TODO Make it so when the method finds a invalid token it cancels the request
         const key = fs.readFileSync(pubPath, {encoding:'utf8'});
-        let error = false;
 
          let resolve = await jwt.verify(token, key,{algorithms: ['RS256']}, async (errVerify, decoded) => {
             if (errVerify) return await errVerify;
@@ -229,7 +330,6 @@ async function registerRoutes() {
 
 
 }
-
 function calculateTotals() {
 
     let dataDir = 'src/data/';
@@ -451,6 +551,16 @@ function calculateTotals() {
     }
 }
 
+function getTimeStamp() {
+    let date = new Date();
+    date =  date.getUTCFullYear() + '-' +
+        ('00' + (date.getUTCMonth()+1)).slice(-2) + '-' +
+        ('00' + date.getUTCDate()).slice(-2) + ' ' +
+        ('00' + date.getUTCHours()).slice(-2) + ':' +
+        ('00' + date.getUTCMinutes()).slice(-2) + ':' +
+        ('00' + date.getUTCSeconds()).slice(-2);
+    return date
+}
 
 function getFormattedDate() {
     // current date
