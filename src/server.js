@@ -1,3 +1,14 @@
+/*
+ * Copyright (c) 2020. Troy Gidney
+ * All rights reserved
+ * Unauthorized copying of this file, via any medium is strictly prohibited
+ * Proprietary and confidential
+ *
+ * File Last Modified: 6/16/20, 12:34 PM
+ * File: server.js
+ * Project: ss.pxl.plus
+ */
+
 const express = require('express');
 const cors = require('cors');
 const router = express.Router();
